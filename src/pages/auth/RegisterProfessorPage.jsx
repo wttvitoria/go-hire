@@ -1,152 +1,296 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { User, Mail, Lock, Briefcase, GraduationCap as GraduationCapIcon, MapPin, Phone, ArrowLeft, ArrowUpDown } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
-import { useToast } from '@/components/ui/use-toast';
 
-const RegisterProfessorPage = () => {
-  const [formData, setFormData] = useState({
+const educationLevels = [
+  { value: 'educacao_infantil', label: 'Educação Infantil' },
+  { value: 'fundamental_i', label: 'Fundamental I' },
+  { value: 'fundamental_ii', label: 'Fundamental II' },
+  { value: 'medio', label: 'Ensino Médio' },
+  { value: 'tecnico', label: 'Técnico' },
+  { value: 'superior', label: 'Superior' },
+];
+
+const contractTypes = [
+  { value: 'temporario', label: 'Temporário' },
+  { value: 'substituicao', label: 'Substituição' },
+  { value: 'tempo_parcial', label: 'Tempo Parcial' },
+  { value: 'integral', label: 'Integral' },
+  { value: 'freelancer', label: 'Freelancer' },
+];
+
+export default function RegisterProfessorPage() {
+  const { user } = useAuth();
+
+  const [form, setForm] = useState({
     full_name: '',
-    email: '',
-    password: '',
-    area_of_work: '',
-    education_level: '',
-    location: '',
     phone: '',
-    preferred_contract_type: '',
+    city_state: '',
+    subjects: '',
+    education_level: '',
+    contract_type: '',
+    bio: '',
   });
-  const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-  const { signUp } = useAuth();
-  const { toast } = useToast();
 
-  const handleChange = (e) => {
-    const { id, value } = e.target;
-    setFormData((prev) => ({ ...prev, [id]: value }));
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState({ type: '', message: '' });
+
+  // Evita setState após unmount
+  useEffect(() => {
+    let alive = true;
+
+    const loadProfile = async () => {
+      if (!user) return;
+      try {
+        setLoading(true);
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (data && alive) {
+          setForm((prev) => ({
+            ...prev,
+            full_name: data.full_name || '',
+            phone: data.phone || '',
+            city_state: data.city_state || '',
+            subjects: data.subjects || '',
+            education_level: data.education_level || '',
+            contract_type: data.contract_type || '',
+            bio: data.bio || '',
+          }));
+        }
+      } catch (err) {
+        if (alive) setFeedback({ type: 'error', message: 'Falha ao carregar seu perfil.' });
+        console.error(err);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+
+    loadProfile();
+    return () => { alive = false; };
+  }, [user]);
+
+  const onChange = (e) => {
+    const { name, value } = e.target;
+    // Nunca setar undefined em selects / inputs
+    setForm((prev) => ({ ...prev, [name]: value ?? '' }));
   };
 
-  const handleSelectChange = (id, value) => {
-    setFormData((prev) => ({ ...prev, [id]: value }));
-  };
-
-  const handleSubmit = async (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    const { email, password, ...metaData } = formData;
-    const { error } = await signUp(email, password, { ...metaData, role: 'professor' });
-    setLoading(false);
+    if (!user) return;
 
-    if (error) {
-      toast({
-        variant: "destructive",
-        title: "Erro no cadastro",
-        description: error.message,
-      });
-    } else {
-      toast({
-        title: "Cadastro realizado com sucesso!",
-        description: "Verifique seu e-mail para confirmar sua conta.",
-      });
-      navigate('/login');
+    // validações mínimas
+    if (!form.full_name.trim()) {
+      setFeedback({ type: 'error', message: 'Informe seu nome completo.' });
+      return;
+    }
+    if (!form.education_level) {
+      setFeedback({ type: 'error', message: 'Selecione o nível de ensino.' });
+      return;
+    }
+    if (!form.contract_type) {
+      setFeedback({ type: 'error', message: 'Selecione o tipo de contrato.' });
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setFeedback({ type: '', message: '' });
+
+      // upsert no profiles (id é o mesmo de auth.users)
+      const payload = {
+        id: user.id,
+        full_name: form.full_name,
+        phone: form.phone,
+        city_state: form.city_state,
+        subjects: form.subjects,
+        education_level: form.education_level,
+        contract_type: form.contract_type,
+        bio: form.bio,
+      };
+
+      const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+
+      setFeedback({ type: 'success', message: 'Perfil salvo com sucesso!' });
+    } catch (err) {
+      console.error(err);
+      setFeedback({ type: 'error', message: 'Não foi possível salvar seu perfil.' });
+    } finally {
+      setSaving(false);
     }
   };
-
-  const inputFields = [
-    { id: 'full_name', label: 'Nome Completo', type: 'text', icon: User },
-    { id: 'email', label: 'E-mail', type: 'email', icon: Mail },
-    { id: 'password', label: 'Senha', type: 'password', icon: Lock },
-    { id: 'area_of_work', label: 'Área de Atuação', type: 'text', icon: Briefcase },
-    { id: 'location', label: 'Endereço ou Cidade', type: 'text', icon: MapPin },
-    { id: 'phone', label: 'Telefone', type: 'tel', icon: Phone },
-  ];
 
   return (
     <>
       <Helmet>
-        <title>Cadastro de Professor - GO! HIRE</title>
+        <title>Cadastro de Professor • GO! HIRE</title>
       </Helmet>
-      <div 
-        className="min-h-screen flex items-center justify-center p-4"
-        style={{backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'\%23e5e7eb\' fill-opacity=\'0.4\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")'}}
-      >
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-2xl bg-card rounded-2xl shadow-2xl p-8 border"
-        >
-          <div className="text-center mb-8">
-            <Link to="/" className="flex items-center justify-center gap-2 group mb-4">
-              <ArrowUpDown className="w-10 h-10 text-primary" />
-              <span className="text-3xl font-bold text-foreground">GO! HIRE</span>
-            </Link>
-            <h1 className="text-2xl font-bold text-foreground">Cadastro para Professores</h1>
-            <p className="text-muted-foreground">Mostre seu talento e encontre a vaga ideal.</p>
-          </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {inputFields.map(({ id, label, type, icon: Icon }) => (
-                <div key={id} className="space-y-2">
-                  <Label htmlFor={id}>{label}</Label>
-                  <div className="relative">
-                    <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                    <input
-                      id={id}
-                      type={type}
-                      required
-                      value={formData[id]}
-                      onChange={handleChange}
-                      className="w-full pl-10 pr-4 py-3 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
-                    />
-                  </div>
+      <div className="max-w-3xl mx-auto p-6">
+        <h1 className="text-2xl font-bold mb-6">Cadastro de Professor</h1>
+
+        <AnimatePresence mode="wait">
+          {loading ? (
+            <motion.div
+              key="loading"
+              className="flex items-center justify-center min-h-[40vh]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <Loader2 className="w-10 h-10 animate-spin text-primary" />
+            </motion.div>
+          ) : (
+            <motion.form
+              key="form"
+              onSubmit={onSubmit}
+              className="space-y-5 bg-white/70 rounded-md border p-6"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.25 }}
+            >
+              {/* Feedback */}
+              <AnimatePresence>
+                {feedback.message && (
+                  <motion.div
+                    key={feedback.message + feedback.type}
+                    className={`rounded-md p-3 text-sm ${
+                      feedback.type === 'success'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-red-50 text-red-700 border border-red-200'
+                    }`}
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                  >
+                    {feedback.message}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Nome completo</label>
+                  <input
+                    type="text"
+                    name="full_name"
+                    value={form.full_name}
+                    onChange={onChange}
+                    className="w-full rounded-md border px-3 py-2"
+                    placeholder="Ex.: Ana Souza"
+                  />
                 </div>
-              ))}
-              <div className="space-y-2">
-                <Label>Nível de Ensino</Label>
-                <Select onValueChange={(value) => handleSelectChange('education_level', value)}>
-                  <SelectTrigger><SelectValue placeholder="Selecione o nível" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Infantil">Educação Infantil</SelectItem>
-                    <SelectItem value="Fundamental I">Ensino Fundamental I</SelectItem>
-                    <SelectItem value="Fundamental II">Ensino Fundamental II</SelectItem>
-                    <SelectItem value="Médio">Ensino Médio</SelectItem>
-                    <SelectItem value="Superior">Ensino Superior</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Tipo de Contrato Preferencial</Label>
-                <Select onValueChange={(value) => handleSelectChange('preferred_contract_type', value)}>
-                  <SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CLT">CLT</SelectItem>
-                    <SelectItem value="PJ">PJ (Pessoa Jurídica)</SelectItem>
-                    <SelectItem value="Temporário">Temporário</SelectItem>
-                    <SelectItem value="Freelance">Freelance</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-lg py-6" disabled={loading}>
-              {loading ? 'Finalizando...' : 'Finalizar Cadastro'}
-            </Button>
-          </form>
 
-          <div className="mt-8 text-center">
-            <Link to="/register" className="text-sm font-medium text-primary hover:underline flex items-center justify-center">
-              <ArrowLeft className="w-4 h-4 mr-1" />
-              Voltar
-            </Link>
-          </div>
-        </motion.div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Telefone (WhatsApp)</label>
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={form.phone}
+                    onChange={onChange}
+                    className="w-full rounded-md border px-3 py-2"
+                    placeholder="(00) 00000-0000"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Cidade/UF</label>
+                  <input
+                    type="text"
+                    name="city_state"
+                    value={form.city_state}
+                    onChange={onChange}
+                    className="w-full rounded-md border px-3 py-2"
+                    placeholder="Ex.: Recife/PE"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Disciplinas</label>
+                  <input
+                    type="text"
+                    name="subjects"
+                    value={form.subjects}
+                    onChange={onChange}
+                    className="w-full rounded-md border px-3 py-2"
+                    placeholder="Ex.: Matemática, Física"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Nível de ensino</label>
+                  {/* Select SEM motion e controlado */}
+                  <select
+                    name="education_level"
+                    value={form.education_level}
+                    onChange={onChange}
+                    className="w-full rounded-md border px-3 py-2 bg-white"
+                  >
+                    <option value="">Selecione…</option>
+                    {educationLevels.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Tipo de contrato</label>
+                  <select
+                    name="contract_type"
+                    value={form.contract_type}
+                    onChange={onChange}
+                    className="w-full rounded-md border px-3 py-2 bg-white"
+                  >
+                    <option value="">Selecione…</option>
+                    {contractTypes.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Sobre você (bio)</label>
+                <textarea
+                  name="bio"
+                  value={form.bio}
+                  onChange={onChange}
+                  rows={5}
+                  className="w-full rounded-md border px-3 py-2"
+                  placeholder="Conte brevemente sua experiência, certificações e preferências de trabalho."
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 rounded-md bg-emerald-600 text-white px-4 py-2 hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Salvar perfil
+                </button>
+              </div>
+            </motion.form>
+          )}
+        </AnimatePresence>
       </div>
     </>
   );
-};
-
-export default RegisterProfessorPage;
+}
