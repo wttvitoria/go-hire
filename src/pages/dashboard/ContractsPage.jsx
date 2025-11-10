@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Helmet } from 'react-helmet';
+import { Helmet } from 'react-helmet-async';
 import { motion } from 'framer-motion';
 import { Loader2, FileText, CheckCircle, XCircle, Clock, MessageSquare, Check, X, Send } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
